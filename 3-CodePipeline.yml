@@ -48,6 +48,10 @@ Parameters:
     Description: Application ECR
     Type: String
     Default: "fuga-repository"
+  CodeCommitRepositoryName:
+    Description: Sorce code repository name
+    Type: String
+    Default: "hoge"
   CodeSeriesStackName:
     Description: "Stack name of the executed CodeSeries.yml template"
     Type: String
@@ -163,8 +167,37 @@ Resources:
     Properties:
       ApplicationName: !Sub "${ProjectName}-${Environment}-${PipelineName}-deploy"
       ComputePlatform: "ECS"
-  # Deployment Group
-  # 未対応
+    # Deployment Group
+    # 未対応
+
+  # --------------------------------------------
+  # EventBridge
+  # --------------------------------------------
+  EventsRule1:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-${PipelineName}-rule"
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - main
+      State: "ENABLED"
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${Environment}-${PipelineName}-pipeline"
+          Id: "codepipeline-sample2-test-pipeline"
+          RoleArn: !GetAtt EventBridgeRole.Arn
+      EventBusName: "default"
 
   # --------------------------------------------
   # CodePipeline
@@ -326,6 +359,22 @@ Resources:
       MaxSessionDuration: 3600
       ManagedPolicyArns:
         - !Ref CodePipelinePolicy
+  # EventBridge Role
+  EventBridgeRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/service-role/"
+      RoleName: !Sub ${ProjectName}-${Environment}-${PipelineName}-eventbridge-service-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - !Ref EventBridgePolicy
   # --------------------------------------------
   # IAM Policy
   # --------------------------------------------
@@ -527,3 +576,17 @@ Resources:
               - appconfig:StopDeployment
               - appconfig:GetDeployment
             Resource: "*"
+  # EventBridge Policy
+  EventBridgePolicy:
+    Type: "AWS::IAM::ManagedPolicy"
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-${Environment}-${PipelineName}-eventbridge-service-policy
+      Path: "/service-role/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - codepipeline:StartPipelineExecution
+            Resource:
+              - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline1}"
